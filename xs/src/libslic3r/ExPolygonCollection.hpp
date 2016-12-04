@@ -1,7 +1,7 @@
 #ifndef slic3r_ExPolygonCollection_hpp_
 #define slic3r_ExPolygonCollection_hpp_
 
-#include <myinit.h>
+#include "libslic3r.h"
 #include "ExPolygon.hpp"
 #include "Line.hpp"
 #include "Polyline.hpp"
@@ -31,6 +31,13 @@ class ExPolygonCollection
     Polygon convex_hull() const;
     Lines lines() const;
     Polygons contours() const;
+    void append(const ExPolygons &expolygons);
+};
+
+inline ExPolygonCollection&
+operator <<(ExPolygonCollection &coll, const ExPolygons &expolygons) {
+    coll.append(expolygons);
+    return coll;
 };
 
 }

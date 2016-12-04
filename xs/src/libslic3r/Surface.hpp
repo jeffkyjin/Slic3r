@@ -1,6 +1,7 @@
 #ifndef slic3r_Surface_hpp_
 #define slic3r_Surface_hpp_
 
+#include "libslic3r.h"
 #include "ExPolygon.hpp"
 
 namespace Slic3r {
@@ -21,20 +22,45 @@ class Surface
         : surface_type(_surface_type), expolygon(_expolygon),
             thickness(-1), thickness_layers(1), bridge_angle(-1), extra_perimeters(0)
         {};
+    operator Polygons() const;
     double area() const;
     bool is_solid() const;
     bool is_external() const;
     bool is_internal() const;
     bool is_bottom() const;
     bool is_bridge() const;
-    
-    #ifdef SLIC3RXS
-    void from_SV_check(SV* surface_sv);
-    #endif
 };
 
 typedef std::vector<Surface> Surfaces;
 typedef std::vector<Surface*> SurfacesPtr;
+typedef std::vector<const Surface*> SurfacesConstPtr;
+
+inline Polygons
+to_polygons(const Surfaces &surfaces)
+{
+    Slic3r::Polygons pp;
+    for (Surfaces::const_iterator s = surfaces.begin(); s != surfaces.end(); ++s)
+        append_to(pp, (Polygons)*s);
+    return pp;
+}
+
+inline Polygons
+to_polygons(const SurfacesPtr &surfaces)
+{
+    Slic3r::Polygons pp;
+    for (SurfacesPtr::const_iterator s = surfaces.begin(); s != surfaces.end(); ++s)
+        append_to(pp, (Polygons)**s);
+    return pp;
+}
+
+inline Polygons
+to_polygons(const SurfacesConstPtr &surfaces)
+{
+    Slic3r::Polygons pp;
+    for (SurfacesConstPtr::const_iterator s = surfaces.begin(); s != surfaces.end(); ++s)
+        append_to(pp, (Polygons)**s);
+    return pp;
+}
 
 }
 

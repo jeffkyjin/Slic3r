@@ -1,7 +1,7 @@
 %module{Slic3r::XS};
 
 %{
-#include <myinit.h>
+#include <xsinit.h>
 #include "libslic3r/Surface.hpp"
 #include "libslic3r/ClipperUtils.hpp"
 %}
@@ -89,7 +89,7 @@ Surface::offset(delta, scale = CLIPPER_OFFSET_SCALE, joinType = ClipperLib::jtMi
     ClipperLib::JoinType    joinType
     double                  miterLimit
     CODE:
-        offset(*THIS, &RETVAL, delta, scale, joinType, miterLimit);
+        RETVAL = offset(*THIS, delta, scale, joinType, miterLimit);
     OUTPUT:
         RETVAL
 

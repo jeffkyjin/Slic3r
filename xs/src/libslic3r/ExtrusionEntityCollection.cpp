@@ -6,7 +6,7 @@
 namespace Slic3r {
 
 ExtrusionEntityCollection::ExtrusionEntityCollection(const ExtrusionEntityCollection& collection)
-    : no_sort(collection.no_sort), orig_indices(collection.orig_indices)
+    : orig_indices(collection.orig_indices), no_sort(collection.no_sort)
 {
     this->append(collection.entities);
 }
@@ -101,6 +101,31 @@ ExtrusionEntityCollection::append(const ExtrusionPaths &paths)
         this->append(*path);
 }
 
+void
+ExtrusionEntityCollection::append(const Polylines &polylines, const ExtrusionPath &templ)
+{
+    this->entities.reserve(this->entities.size() + polylines.size());
+    for (Polylines::const_iterator it_polyline = polylines.begin(); it_polyline != polylines.end(); ++ it_polyline) {
+        ExtrusionPath *path = templ.clone();
+        path->polyline = *it_polyline;
+        this->entities.push_back(path);
+    }
+}
+
+void
+ExtrusionEntityCollection::replace(size_t i, const ExtrusionEntity &entity)
+{
+    delete this->entities[i];
+    this->entities[i] = entity.clone();
+}
+
+void
+ExtrusionEntityCollection::remove(size_t i)
+{
+    delete this->entities[i];
+    this->entities.erase(this->entities.begin() + i);
+}
+
 ExtrusionEntityCollection
 ExtrusionEntityCollection::chained_path(bool no_reverse, std::vector<size_t>* orig_indices) const
 {
@@ -167,10 +192,8 @@ Polygons
 ExtrusionEntityCollection::grow() const
 {
     Polygons pp;
-    for (ExtrusionEntitiesPtr::const_iterator it = this->entities.begin(); it != this->entities.end(); ++it) {
-        Polygons entity_pp = (*it)->grow();
-        pp.insert(pp.end(), entity_pp.begin(), entity_pp.end());
-    }
+    for (ExtrusionEntitiesPtr::const_iterator it = this->entities.begin(); it != this->entities.end(); ++it)
+        append_to(pp, (*it)->grow());
     return pp;
 }
 
@@ -226,10 +249,5 @@ ExtrusionEntityCollection::min_mm3_per_mm() const
     }
     return min_mm3_per_mm;
 }
-
-#ifdef SLIC3RXS
-// there is no ExtrusionLoop::Collection or ExtrusionEntity::Collection
-REGISTER_CLASS(ExtrusionEntityCollection, "ExtrusionPath::Collection");
-#endif
 
 }

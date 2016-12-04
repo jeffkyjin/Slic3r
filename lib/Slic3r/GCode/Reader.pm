@@ -15,14 +15,14 @@ my @AXES = qw(X Y Z E);
 sub apply_print_config {
     my ($self, $print_config) = @_;
     
-    $self->config->apply_print_config($print_config);
+    $self->config->apply_static($print_config);
     $self->_extrusion_axis($self->config->get_extrusion_axis);
 }
 
 sub clone {
     my $self = shift;
     return (ref $self)->new(
-        map { $_ => $self->$_ } (@AXES, 'F', '_extrusion_axis'),
+        map { $_ => $self->$_ } (@AXES, 'F', '_extrusion_axis', 'config'),
     );
 }
 

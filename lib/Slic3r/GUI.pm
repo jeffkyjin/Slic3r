@@ -5,10 +5,15 @@ use utf8;
 
 use File::Basename qw(basename);
 use FindBin;
+use List::Util qw(first);
+use Slic3r::GUI::2DBed;
 use Slic3r::GUI::AboutDialog;
 use Slic3r::GUI::BedShapeDialog;
 use Slic3r::GUI::BonjourBrowser;
 use Slic3r::GUI::ConfigWizard;
+use Slic3r::GUI::Controller;
+use Slic3r::GUI::Controller::ManualControlDialog;
+use Slic3r::GUI::Controller::PrinterPanel;
 use Slic3r::GUI::MainFrame;
 use Slic3r::GUI::Notifier;
 use Slic3r::GUI::Plater;
@@ -22,16 +27,18 @@ use Slic3r::GUI::Plater::ObjectSettingsDialog;
 use Slic3r::GUI::Plater::OverrideSettingsPanel;
 use Slic3r::GUI::Preferences;
 use Slic3r::GUI::ProgressStatusBar;
+use Slic3r::GUI::Projector;
 use Slic3r::GUI::OptionsGroup;
 use Slic3r::GUI::OptionsGroup::Field;
 use Slic3r::GUI::SimpleTab;
+use Slic3r::GUI::SLAPrintOptions;
 use Slic3r::GUI::Tab;
 
 our $have_OpenGL = eval "use Slic3r::GUI::3DScene; 1";
 our $have_LWP    = eval "use LWP::UserAgent; 1";
 
 use Wx 0.9901 qw(:bitmap :dialog :icon :id :misc :systemsettings :toplevelwindow
-    :filedialog);
+    :filedialog :font);
 use Wx::Event qw(EVT_IDLE EVT_COMMAND);
 use base 'Wx::App';
 
@@ -47,6 +54,8 @@ use constant FILE_WILDCARDS => {
 use constant MODEL_WILDCARD => join '|', @{&FILE_WILDCARDS}{qw(known stl obj amf)};
 
 our $datadir;
+# If set, the "Controller" tab for the control of the printer over serial line and the serial port settings are hidden.
+our $no_controller;
 our $no_plater;
 our $mode;
 our $autosave;
@@ -58,16 +67,25 @@ our $Settings = {
         version_check => 1,
         autocenter => 1,
         background_processing => 1,
+        # If set, the "Controller" tab for the control of the printer over serial line and the serial port settings are hidden.
+        # By default, Prusa has the controller hidden.
+        no_controller => 1,
     },
 };
 
 our $have_button_icons = &Wx::wxVERSION_STRING =~ / (?:2\.9\.[1-9]|3\.)/;
 our $small_font = Wx::SystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
 $small_font->SetPointSize(11) if !&Wx::wxMSW;
+our $small_bold_font = Wx::SystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
+$small_bold_font->SetPointSize(11) if !&Wx::wxMSW;
+$small_bold_font->SetWeight(wxFONTWEIGHT_BOLD);
 our $medium_font = Wx::SystemSettings::GetFont(wxSYS_DEFAULT_GUI_FONT);
 $medium_font->SetPointSize(12);
+our $grey = Wx::Colour->new(200,200,200);
 
 our $VERSION_CHECK_EVENT : shared = Wx::NewEventType;
+
+our $DLP_projection_screen;
 
 sub OnInit {
     my ($self) = @_;
@@ -78,6 +96,9 @@ sub OnInit {
     $self->{notifier} = Slic3r::GUI::Notifier->new;
     
     # locate or create data directory
+    # Unix: ~/.Slic3r
+    # Windows: "C:\Users\username\AppData\Roaming\Slic3r" or "C:\Documents and Settings\username\Application Data\Slic3r"
+    # Mac: "~/Library/Application Support/Slic3r"
     $datadir ||= Slic3r::decode_path(Wx::StandardPaths::Get->GetUserDataDir);
     my $enc_datadir = Slic3r::encode_path($datadir);
     Slic3r::debugf "Data directory: %s\n", $datadir;
@@ -103,6 +124,8 @@ sub OnInit {
         $Settings->{_}{mode} ||= 'expert';
         $Settings->{_}{autocenter} //= 1;
         $Settings->{_}{background_processing} //= 1;
+        # If set, the "Controller" tab for the control of the printer over serial line and the serial port settings are hidden.
+        $Settings->{_}{no_controller} //= 1;
     }
     $Settings->{_}{version} = $Slic3r::VERSION;
     $self->save_settings;
@@ -110,10 +133,28 @@ sub OnInit {
     # application frame
     Wx::Image::AddHandler(Wx::PNGHandler->new);
     $self->{mainframe} = my $frame = Slic3r::GUI::MainFrame->new(
-        mode        => $mode // $Settings->{_}{mode},
-        no_plater   => $no_plater,
+        mode            => $mode // $Settings->{_}{mode},
+        # If set, the "Controller" tab for the control of the printer over serial line and the serial port settings are hidden.
+        no_controller   => $no_controller // $Settings->{_}{no_controller},
+        no_plater       => $no_plater,
     );
     $self->SetTopWindow($frame);
+    
+    # load init bundle
+    {
+        my @dirs = ($FindBin::Bin);
+        if (&Wx::wxMAC) {
+            push @dirs, qw();
+        } elsif (&Wx::wxMSW) {
+            push @dirs, qw();
+        }
+        my $init_bundle = first { -e $_ } map "$_/.init_bundle.ini", @dirs;
+        if ($init_bundle) {
+            Slic3r::debugf "Loading config bundle from %s\n", $init_bundle;
+            $self->{mainframe}->load_configbundle($init_bundle, 1);
+            $run_wizard = 0;
+        }
+    }
     
     if (!$run_wizard && (!defined $last_version || $last_version ne $Slic3r::VERSION)) {
         # user was running another Slic3r version on this computer
@@ -303,6 +344,31 @@ sub open_model {
 sub CallAfter {
     my ($self, $cb) = @_;
     push @cb, $cb;
+}
+
+sub scan_serial_ports {
+    my ($self) = @_;
+    
+    my @ports = ();
+    
+    if ($^O eq 'MSWin32') {
+        # Windows
+        if (eval "use Win32::TieRegistry; 1") {
+            my $ts = Win32::TieRegistry->new("HKEY_LOCAL_MACHINE\\HARDWARE\\DEVICEMAP\\SERIALCOMM",
+                { Access => 'KEY_READ' });
+            if ($ts) {
+                # when no serial ports are available, the registry key doesn't exist and 
+                # TieRegistry->new returns undef
+                $ts->Tie(\my %reg);
+                push @ports, sort values %reg;
+            }
+        }
+    } else {
+        # UNIX and OS X
+        push @ports, glob '/dev/{ttyUSB,ttyACM,tty.,cu.,rfcomm}*';
+    }
+    
+    return grep !/Bluetooth|FireFly/, @ports;
 }
 
 1;

@@ -29,7 +29,7 @@ SurfaceCollection::simplify(double tolerance)
     Surfaces ss;
     for (Surfaces::const_iterator it_s = this->surfaces.begin(); it_s != this->surfaces.end(); ++it_s) {
         ExPolygons expp;
-        it_s->expolygon.simplify(tolerance, expp);
+        it_s->expolygon.simplify(tolerance, &expp);
         for (ExPolygons::const_iterator it_e = expp.begin(); it_e != expp.end(); ++it_e) {
             Surface s = *it_s;
             s.expolygon = *it_e;
@@ -41,13 +41,13 @@ SurfaceCollection::simplify(double tolerance)
 
 /* group surfaces by common properties */
 void
-SurfaceCollection::group(std::vector<SurfacesPtr> *retval)
+SurfaceCollection::group(std::vector<SurfacesConstPtr> *retval) const
 {
-    for (Surfaces::iterator it = this->surfaces.begin(); it != this->surfaces.end(); ++it) {
+    for (Surfaces::const_iterator it = this->surfaces.begin(); it != this->surfaces.end(); ++it) {
         // find a group with the same properties
-        SurfacesPtr* group = NULL;
-        for (std::vector<SurfacesPtr>::iterator git = retval->begin(); git != retval->end(); ++git) {
-            Surface* gkey = git->front();
+        SurfacesConstPtr* group = NULL;
+        for (std::vector<SurfacesConstPtr>::iterator git = retval->begin(); git != retval->end(); ++git) {
+            const Surface* gkey = git->front();
             if (   gkey->surface_type      == it->surface_type
                 && gkey->thickness         == it->thickness
                 && gkey->thickness_layers  == it->thickness_layers
@@ -104,15 +104,48 @@ void
 SurfaceCollection::filter_by_type(SurfaceType type, Polygons* polygons)
 {
     for (Surfaces::iterator surface = this->surfaces.begin(); surface != this->surfaces.end(); ++surface) {
-        if (surface->surface_type == type) {
-            Polygons pp = surface->expolygon;
-            polygons->insert(polygons->end(), pp.begin(), pp.end());
-        }
+        if (surface->surface_type == type)
+            append_to(*polygons, (Polygons)surface->expolygon);
     }
 }
 
-#ifdef SLIC3RXS
-REGISTER_CLASS(SurfaceCollection, "Surface::Collection");
-#endif
+void
+SurfaceCollection::append(const SurfaceCollection &coll)
+{
+    this->append(coll.surfaces);
+}
+
+void
+SurfaceCollection::append(const Surfaces &surfaces)
+{
+    append_to(this->surfaces, surfaces);
+}
+
+void
+SurfaceCollection::append(const ExPolygons &src, const Surface &templ)
+{
+    this->surfaces.reserve(this->surfaces.size() + src.size());
+    for (ExPolygons::const_iterator it = src.begin(); it != src.end(); ++ it) {
+        this->surfaces.push_back(templ);
+        this->surfaces.back().expolygon = *it;
+    }
+}
+
+void
+SurfaceCollection::append(const ExPolygons &src, SurfaceType surfaceType)
+{
+    this->surfaces.reserve(this->surfaces.size() + src.size());
+    for (ExPolygons::const_iterator it = src.begin(); it != src.end(); ++ it)
+        this->surfaces.push_back(Surface(surfaceType, *it));
+}
+
+size_t
+SurfaceCollection::polygons_count() const
+{
+    size_t count = 0;
+    for (Surfaces::const_iterator it = this->surfaces.begin(); it != this->surfaces.end(); ++ it)
+        count += 1 + it->expolygon.holes.size();
+    return count;
+}
 
 }

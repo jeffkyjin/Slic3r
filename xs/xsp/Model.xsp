@@ -1,7 +1,7 @@
 %module{Slic3r::XS};
 
 %{
-#include <myinit.h>
+#include <xsinit.h>
 #include "libslic3r/Model.hpp"
 #include "libslic3r/PrintConfig.hpp"
 %}
@@ -53,10 +53,6 @@
     size_t material_count() const
         %code%{ RETVAL = THIS->materials.size(); %};
 
-    // void duplicate_objects_grid(coordf_t x, coordf_t y, coordf_t distance);
-    // void duplicate_objects(size_t copies_num, coordf_t distance, const BoundingBox &bb);
-    // void arrange_objects(coordf_t distance, const BoundingBox &bb);
-    // void duplicate(size_t copies_num, coordf_t distance, const BoundingBox &bb);
     bool has_objects_with_no_instances();
     bool add_default_instances();
     Clone<BoundingBoxf3> bounding_box();
@@ -66,11 +62,16 @@
     void translate(double x, double y, double z);
     Clone<TriangleMesh> mesh();
     Clone<TriangleMesh> raw_mesh();
-    // void split_meshes();
-    // std::string get_material_name(t_model_material_id material_id);
 
     ModelObjectPtrs* objects()
         %code%{ RETVAL = &THIS->objects; %};
+    
+    bool arrange_objects(double dist, BoundingBoxf* bb = NULL);
+    void duplicate(unsigned int copies_num, double dist, BoundingBoxf* bb = NULL);
+    void duplicate_objects(unsigned int copies_num, double dist, BoundingBoxf* bb = NULL);
+    void duplicate_objects_grid(unsigned int x, unsigned int y, double dist);
+    void print_info();
+    void repair();
 };
 
 
@@ -142,6 +143,8 @@ ModelMaterial::attributes()
     void clear_volumes();
     int volumes_count()
         %code%{ RETVAL = THIS->volumes.size(); %};
+    Ref<ModelVolume> get_volume(int idx)
+        %code%{ RETVAL = THIS->volumes.at(idx); %};
 
     %name{_add_instance} Ref<ModelInstance> add_instance();
     Ref<ModelInstance> _add_instance_clone(ModelInstance* other)
@@ -183,7 +186,7 @@ ModelMaterial::attributes()
     void scale_xyz(Pointf3* versor)
         %code{% THIS->scale(*versor); %};
     void rotate(float angle, Axis axis);
-    void flip(Axis axis);
+    void mirror(Axis axis);
     
     Model* cut(double z)
         %code%{
@@ -196,6 +199,9 @@ ModelMaterial::attributes()
             RETVAL = new ModelObjectPtrs();  // leak?
             THIS->split(RETVAL);
         %};
+    
+    void print_info();
+    void repair();
 };
 
 
@@ -223,6 +229,15 @@ ModelMaterial::attributes()
         %code%{ THIS->modifier = modifier; %};
     
     ModelMaterial* assign_unique_material();
+
+    void extrude_tin(float offset)
+        %code%{
+            try {
+                THIS->mesh.extrude_tin(offset);
+            } catch (std::exception& e) {
+                croak("%s", e.what());
+            }
+        %};
 };
 
 

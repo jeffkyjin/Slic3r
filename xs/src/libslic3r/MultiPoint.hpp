@@ -1,7 +1,7 @@
 #ifndef slic3r_MultiPoint_hpp_
 #define slic3r_MultiPoint_hpp_
 
-#include <myinit.h>
+#include "libslic3r.h"
 #include <algorithm>
 #include <vector>
 #include "Line.hpp"
@@ -22,31 +22,34 @@ class MultiPoint
     void scale(double factor);
     void translate(double x, double y);
     void translate(const Point &vector);
+    void rotate(double angle);
     void rotate(double angle, const Point &center);
     void reverse();
     Point first_point() const;
     virtual Point last_point() const = 0;
     virtual Lines lines() const = 0;
     double length() const;
-    bool is_valid() const;
+    bool is_valid() const { return this->points.size() >= 2; }
+
     int find_point(const Point &point) const;
     bool has_boundary_point(const Point &point) const;
     BoundingBox bounding_box() const;
-    void remove_duplicate_points();
+    
+    // Return true if there are exact duplicates.
+    bool has_duplicate_points() const;
+    
+    // Remove exact duplicates, return true if any duplicate has been removed.
+    bool remove_duplicate_points();
+    
     void append(const Point &point);
     void append(const Points &points);
     void append(const Points::const_iterator &begin, const Points::const_iterator &end);
+    bool intersection(const Line& line, Point* intersection) const;
+    std::string dump_perl() const;
     
     static Points _douglas_peucker(const Points &points, const double tolerance);
-    
-    #ifdef SLIC3RXS
-    void from_SV(SV* poly_sv);
-    void from_SV_check(SV* poly_sv);
-    SV* to_AV();
-    SV* to_SV_pureperl() const;
-    #endif
 };
 
-}
+} // namespace Slic3r
 
 #endif

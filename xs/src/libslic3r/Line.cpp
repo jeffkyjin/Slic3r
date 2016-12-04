@@ -163,50 +163,60 @@ Line::normal() const
     return Vector((this->b.y - this->a.y), -(this->b.x - this->a.x));
 }
 
-#ifdef SLIC3RXS
-
-REGISTER_CLASS(Line, "Line");
-
 void
-Line::from_SV(SV* line_sv)
+Line::extend_end(double distance)
 {
-    AV* line_av = (AV*)SvRV(line_sv);
-    this->a.from_SV_check(*av_fetch(line_av, 0, 0));
-    this->b.from_SV_check(*av_fetch(line_av, 1, 0));
+    // relocate last point by extending the segment by the specified length
+    Line line = *this;
+    line.reverse();
+    this->b = line.point_at(-distance);
 }
 
 void
-Line::from_SV_check(SV* line_sv)
+Line::extend_start(double distance)
 {
-    if (sv_isobject(line_sv) && (SvTYPE(SvRV(line_sv)) == SVt_PVMG)) {
-        if (!sv_isa(line_sv, perl_class_name(this)) && !sv_isa(line_sv, perl_class_name_ref(this)))
-            CONFESS("Not a valid %s object", perl_class_name(this));
-        *this = *(Line*)SvIV((SV*)SvRV( line_sv ));
-    } else {
-        this->from_SV(line_sv);
+    // relocate first point by extending the first segment by the specified length
+    this->a = this->point_at(-distance);
+}
+
+bool
+Line::intersection(const Line& line, Point* intersection) const
+{
+    double denom = ((double)(line.b.y - line.a.y)*(this->b.x - this->a.x)) -
+                   ((double)(line.b.x - line.a.x)*(this->b.y - this->a.y));
+
+    double nume_a = ((double)(line.b.x - line.a.x)*(this->a.y - line.a.y)) -
+                    ((double)(line.b.y - line.a.y)*(this->a.x - line.a.x));
+
+    double nume_b = ((double)(this->b.x - this->a.x)*(this->a.y - line.a.y)) -
+                    ((double)(this->b.y - this->a.y)*(this->a.x - line.a.x));
+    
+    if (fabs(denom) < EPSILON) {
+        if (fabs(nume_a) < EPSILON && fabs(nume_b) < EPSILON) {
+            return false; // coincident
+        }
+        return false; // parallel
     }
+
+    double ua = nume_a / denom;
+    double ub = nume_b / denom;
+
+    if (ua >= 0 && ua <= 1.0f && ub >= 0 && ub <= 1.0f)
+    {
+        // Get the intersection point.
+        intersection->x = this->a.x + ua*(this->b.x - this->a.x);
+        intersection->y = this->a.y + ua*(this->b.y - this->a.y);
+        return true;
+    }
+    
+    return false;  // not intersecting
 }
 
-SV*
-Line::to_AV() {
-    AV* av = newAV();
-    av_extend(av, 1);
-    
-    av_store(av, 0, perl_to_SV_ref(this->a));
-    av_store(av, 1, perl_to_SV_ref(this->b));
-    
-    return newRV_noinc((SV*)av);
+double
+Line::ccw(const Point& point) const
+{
+    return point.ccw(*this);
 }
-
-SV*
-Line::to_SV_pureperl() const {
-    AV* av = newAV();
-    av_extend(av, 1);
-    av_store(av, 0, this->a.to_SV_pureperl());
-    av_store(av, 1, this->b.to_SV_pureperl());
-    return newRV_noinc((SV*)av);
-}
-#endif
 
 Pointf3
 Linef3::intersect_plane(double z) const
@@ -224,9 +234,5 @@ Linef3::scale(double factor)
     this->a.scale(factor);
     this->b.scale(factor);
 }
-
-#ifdef SLIC3RXS
-REGISTER_CLASS(Linef3, "Linef3");
-#endif
 
 }

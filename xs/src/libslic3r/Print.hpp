@@ -1,10 +1,11 @@
 #ifndef slic3r_Print_hpp_
 #define slic3r_Print_hpp_
 
-#include <myinit.h>
+#include "libslic3r.h"
 #include <set>
+#include <string>
 #include <vector>
-#include <stdexcept>
+#include <boost/thread.hpp>
 #include "BoundingBox.hpp"
 #include "Flow.hpp"
 #include "PrintConfig.hpp"
@@ -20,7 +21,7 @@ class Print;
 class PrintObject;
 class ModelObject;
 
-
+// Print step IDs for keeping track of the print state.
 enum PrintStep {
     psSkirt, psBrim,
 };
@@ -29,11 +30,7 @@ enum PrintObjectStep {
     posInfill, posSupportMaterial,
 };
 
-class PrintValidationException : public std::runtime_error {
-    public:
-    PrintValidationException(const std::string &error) : std::runtime_error(error) {};
-};
-
+// To be instantiated over PrintStep or PrintObjectStep enums.
 template <class StepType>
 class PrintState
 {
@@ -120,6 +117,7 @@ class PrintObject
     size_t layer_count() const;
     void clear_layers();
     Layer* get_layer(int idx);
+    // print_z: top of the layer; slice_z: center of the layer.
     Layer* add_layer(int id, coordf_t height, coordf_t print_z, coordf_t slice_z);
     void delete_layer(int idx);
 
@@ -135,7 +133,11 @@ class PrintObject
     bool invalidate_all_steps();
     
     bool has_support_material() const;
+    void detect_surfaces_type();
+    void process_external_surfaces();
     void bridge_over_infill();
+    void _make_perimeters();
+    void _infill();
     
     private:
     Print* _print;
@@ -151,6 +153,7 @@ class PrintObject
 typedef std::vector<PrintObject*> PrintObjectPtrs;
 typedef std::vector<PrintRegion*> PrintRegionPtrs;
 
+// The complete print tray with possibly multiple objects.
 class Print
 {
     public:
@@ -162,6 +165,7 @@ class Print
     PlaceholderParser placeholder_parser;
     // TODO: status_cb
     double total_used_filament, total_extruded_volume;
+    std::map<size_t,float> filament_stats;
     PrintState<PrintStep> state;
 
     // ordered collections of extrusion paths to build skirt loops and brim
@@ -178,7 +182,8 @@ class Print
     bool reload_model_instances();
 
     // methods for handling regions
-    PrintRegion* get_region(size_t idx);
+    PrintRegion* get_region(size_t idx) { return this->regions.at(idx); };
+    const PrintRegion* get_region(size_t idx) const { return this->regions.at(idx); };
     PrintRegion* add_region();
     
     // methods for handling state
@@ -191,7 +196,8 @@ class Print
     bool apply_config(DynamicPrintConfig config);
     bool has_infinite_skirt() const;
     bool has_skirt() const;
-    void validate() const;
+    // Returns an empty string if valid, otherwise returns an error message.
+    std::string validate() const;
     BoundingBox bounding_box() const;
     BoundingBox total_bounding_box() const;
     double skirt_first_layer_height() const;
@@ -204,6 +210,7 @@ class Print
     void _simplify_slices(double distance);
     double max_allowed_layer_height() const;
     bool has_support_material() const;
+    void auto_assign_extruders(ModelObject* model_object) const;
     
     private:
     void clear_regions();

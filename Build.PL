@@ -7,6 +7,7 @@ use Config;
 use File::Spec;
 
 my %prereqs = qw(
+    Devel::CheckLib                 0
     Encode                          0
     Encode::Locale                  1.05
     ExtUtils::MakeMaker             6.80
@@ -14,7 +15,6 @@ my %prereqs = qw(
     File::Basename                  0
     File::Spec                      0
     Getopt::Long                    0
-    Math::PlanePath                 53
     Module::Build::WithXSpp         0.14
     Moo                             1.003001
     POSIX                           0
@@ -49,6 +49,8 @@ if ($gui) {
     Net::Bonjour                    0
     );
     if ($^O eq 'MSWin32') {
+        $recommends{"Win32::TieRegistry"} = 0;
+        
         # we need an up-to-date Win32::API because older aren't thread-safe (GH #2517)
         $prereqs{'Win32::API'} = 0.79;
     }
@@ -108,11 +110,6 @@ EOF
 
     # make sure our cpanm is updated (old ones don't support the ~ syntax)
     system $cpanm, @cpanm_args, 'App::cpanminus';
-    
-    # install the Windows-compatible Math::Libm
-    if ($^O eq 'MSWin32' && !eval "use Math::Libm; 1") {
-        system $cpanm, @cpanm_args, 'https://github.com/alexrj/Math-Libm/tarball/master';
-    }
     
     my %modules = (%prereqs, %recommends);
     foreach my $module (sort keys %modules) {

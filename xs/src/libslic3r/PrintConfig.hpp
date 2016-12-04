@@ -1,6 +1,24 @@
+// Configuration store of Slic3r.
+//
+// The configuration store is either static or dynamic.
+// DynamicPrintConfig is used mainly at the user interface. while the StaticPrintConfig is used
+// during the slicing and the g-code generation.
+//
+// The classes derived from StaticPrintConfig form a following hierarchy.
+// Virtual inheritance is used for some of the parent objects.
+//
+// FullPrintConfig
+//    PrintObjectConfig
+//    PrintRegionConfig
+//    PrintConfig
+//        GCodeConfig
+//    HostConfig
+//
+
 #ifndef slic3r_PrintConfig_hpp_
 #define slic3r_PrintConfig_hpp_
 
+#include "libslic3r.h"
 #include "Config.hpp"
 
 #define OPT_PTR(KEY) if (opt_key == #KEY) return &this->KEY
@@ -8,11 +26,13 @@
 namespace Slic3r {
 
 enum GCodeFlavor {
-    gcfRepRap, gcfTeacup, gcfMakerWare, gcfSailfish, gcfMach3, gcfMachinekit, gcfNoExtrusion,
+    gcfRepRap, gcfTeacup, gcfMakerWare, gcfSailfish, gcfMach3, gcfMachinekit, gcfNoExtrusion, gcfSmoothie, gcfRepetier,
 };
 
 enum InfillPattern {
-    ipRectilinear, ipLine, ipConcentric, ipHoneycomb, ip3DHoneycomb,
+    ipRectilinear, ipGrid, ipLine, ipAlignedRectilinear,
+    ipRectilinear2, ipGrid2, ipTriangles, ipStars, ipCubic, 
+    ipConcentric, ipHoneycomb, ip3DHoneycomb,
     ipHilbertCurve, ipArchimedeanChords, ipOctagramSpiral,
 };
 
@@ -27,19 +47,28 @@ enum SeamPosition {
 template<> inline t_config_enum_values ConfigOptionEnum<GCodeFlavor>::get_enum_values() {
     t_config_enum_values keys_map;
     keys_map["reprap"]          = gcfRepRap;
+    keys_map["repetier"]        = gcfRepetier;
     keys_map["teacup"]          = gcfTeacup;
     keys_map["makerware"]       = gcfMakerWare;
     keys_map["sailfish"]        = gcfSailfish;
     keys_map["mach3"]           = gcfMach3;
     keys_map["machinekit"]      = gcfMachinekit;
     keys_map["no-extrusion"]    = gcfNoExtrusion;
+    keys_map["smoothie"]    = gcfSmoothie;
     return keys_map;
 }
 
 template<> inline t_config_enum_values ConfigOptionEnum<InfillPattern>::get_enum_values() {
     t_config_enum_values keys_map;
     keys_map["rectilinear"]         = ipRectilinear;
+    keys_map["alignedrectilinear"]  = ipAlignedRectilinear;
+    keys_map["grid"]                = ipGrid;
     keys_map["line"]                = ipLine;
+    keys_map["rectilinear2"]        = ipRectilinear2;
+    keys_map["grid2"]               = ipGrid2;
+    keys_map["triangles"]           = ipTriangles;
+    keys_map["stars"]               = ipStars;
+    keys_map["cubic"]               = ipCubic;
     keys_map["concentric"]          = ipConcentric;
     keys_map["honeycomb"]           = ipHoneycomb;
     keys_map["3dhoneycomb"]         = ip3DHoneycomb;
@@ -66,32 +95,50 @@ template<> inline t_config_enum_values ConfigOptionEnum<SeamPosition>::get_enum_
     return keys_map;
 }
 
-class PrintConfigDef
+// Defines each and every confiuration option of Slic3r, including the properties of the GUI dialogs.
+// Does not store the actual values, but defines default values.
+class PrintConfigDef : public ConfigDef
 {
     public:
-    static t_optiondef_map def;
-    
-    static t_optiondef_map build_def();
+    PrintConfigDef();
 };
 
-class DynamicPrintConfig : public DynamicConfig
+// The one and only global definition of SLic3r configuration options.
+// This definition is constant.
+extern PrintConfigDef print_config_def;
+
+// Slic3r configuration storage with print_config_def assigned.
+class PrintConfigBase : public virtual ConfigBase
 {
     public:
-    DynamicPrintConfig() {
-        this->def = &PrintConfigDef::def;
+    PrintConfigBase() {
+        this->def = &print_config_def;
     };
     
+    double min_object_distance() const;
+};
+
+// Slic3r dynamic configuration, used to override the configuration 
+// per object, per modification volume or per printing material.
+// The dynamic configuration is also used to store user modifications of the print global parameters,
+// so the modified configuration values may be diffed against the active configuration
+// to invalidate the proper slicing resp. g-code generation processing steps.
+// This object is mapped to Perl as Slic3r::Config.
+class DynamicPrintConfig : public PrintConfigBase, public DynamicConfig
+{
+    public:
+    DynamicPrintConfig() : PrintConfigBase(), DynamicConfig() {};
     void normalize();
 };
 
-class StaticPrintConfig : public virtual StaticConfig
+
+class StaticPrintConfig : public PrintConfigBase, public StaticConfig
 {
     public:
-    StaticPrintConfig() {
-        this->def = &PrintConfigDef::def;
-    };
+    StaticPrintConfig() : PrintConfigBase(), StaticConfig() {};
 };
 
+// This object is mapped to Perl as Slic3r::Config::PrintObject.
 class PrintObjectConfig : public virtual StaticPrintConfig
 {
     public:
@@ -119,37 +166,12 @@ class PrintObjectConfig : public virtual StaticPrintConfig
     ConfigOptionInt                 support_material_threshold;
     ConfigOptionFloat               xy_size_compensation;
     
-    PrintObjectConfig() : StaticPrintConfig() {
-        this->dont_support_bridges.value                         = true;
-        this->extrusion_width.value                              = 0;
-        this->extrusion_width.percent                            = false;
-        this->first_layer_height.value                           = 0.35;
-        this->first_layer_height.percent                         = false;
-        this->infill_only_where_needed.value                     = false;
-        this->interface_shells.value                             = false;
-        this->layer_height.value                                 = 0.3;
-        this->raft_layers.value                                  = 0;
-        this->seam_position.value                                = spAligned;
-        this->support_material.value                             = false;
-        this->support_material_angle.value                       = 0;
-        this->support_material_contact_distance.value            = 0.2;
-        this->support_material_enforce_layers.value              = 0;
-        this->support_material_extruder.value                    = 1;
-        this->support_material_extrusion_width.value             = 0;
-        this->support_material_extrusion_width.percent           = false;
-        this->support_material_interface_extruder.value          = 1;
-        this->support_material_interface_layers.value            = 3;
-        this->support_material_interface_spacing.value           = 0;
-        this->support_material_interface_speed.value             = 100;
-        this->support_material_interface_speed.percent           = true;
-        this->support_material_pattern.value                     = smpPillars;
-        this->support_material_spacing.value                     = 2.5;
-        this->support_material_speed.value                       = 60;
-        this->support_material_threshold.value                   = 0;
-        this->xy_size_compensation.value                         = 0;
-    };
+    PrintObjectConfig(bool initialize = true) : StaticPrintConfig() {
+        if (initialize)
+            this->set_defaults();
+    }
     
-    ConfigOption* option(const t_config_option_key opt_key, bool create = false) {
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
         OPT_PTR(dont_support_bridges);
         OPT_PTR(extrusion_width);
         OPT_PTR(first_layer_height);
@@ -178,6 +200,7 @@ class PrintObjectConfig : public virtual StaticPrintConfig
     };
 };
 
+// This object is mapped to Perl as Slic3r::Config::PrintRegion.
 class PrintRegionConfig : public virtual StaticPrintConfig
 {
     public:
@@ -189,7 +212,7 @@ class PrintRegionConfig : public virtual StaticPrintConfig
     ConfigOptionFloatOrPercent      external_perimeter_speed;
     ConfigOptionBool                external_perimeters_first;
     ConfigOptionBool                extra_perimeters;
-    ConfigOptionInt                 fill_angle;
+    ConfigOptionFloat               fill_angle;
     ConfigOptionPercent             fill_density;
     ConfigOptionEnum<InfillPattern> fill_pattern;
     ConfigOptionFloat               gap_fill_speed;
@@ -214,52 +237,12 @@ class PrintRegionConfig : public virtual StaticPrintConfig
     ConfigOptionInt                 top_solid_layers;
     ConfigOptionFloatOrPercent      top_solid_infill_speed;
     
-    PrintRegionConfig() : StaticPrintConfig() {
-        this->bottom_solid_layers.value                          = 3;
-        this->bridge_flow_ratio.value                            = 1;
-        this->bridge_speed.value                                 = 60;
-        this->external_fill_pattern.value                        = ipRectilinear;
-        this->external_perimeter_extrusion_width.value           = 0;
-        this->external_perimeter_extrusion_width.percent         = false;
-        this->external_perimeter_speed.value                     = 50;
-        this->external_perimeter_speed.percent                   = true;
-        this->external_perimeters_first.value                    = false;
-        this->extra_perimeters.value                             = true;
-        this->fill_angle.value                                   = 45;
-        this->fill_density.value                                 = 20;
-        this->fill_pattern.value                                 = ipHoneycomb;
-        this->gap_fill_speed.value                               = 20;
-        this->infill_extruder.value                              = 1;
-        this->infill_extrusion_width.value                       = 0;
-        this->infill_extrusion_width.percent                     = false;
-        this->infill_every_layers.value                          = 1;
-        this->infill_overlap.value                               = 15;
-        this->infill_overlap.percent                             = true;
-        this->infill_speed.value                                 = 80;
-        this->overhangs.value                                    = true;
-        this->perimeter_extruder.value                           = 1;
-        this->perimeter_extrusion_width.value                    = 0;
-        this->perimeter_extrusion_width.percent                  = false;
-        this->perimeter_speed.value                              = 60;
-        this->perimeters.value                                   = 3;
-        this->solid_infill_extruder.value                        = 1;
-        this->small_perimeter_speed.value                        = 15;
-        this->small_perimeter_speed.percent                      = false;
-        this->solid_infill_below_area.value                      = 70;
-        this->solid_infill_extrusion_width.value                 = 0;
-        this->solid_infill_extrusion_width.percent               = false;
-        this->solid_infill_every_layers.value                    = 0;
-        this->solid_infill_speed.value                           = 20;
-        this->solid_infill_speed.percent                         = false;
-        this->thin_walls.value                                   = true;
-        this->top_infill_extrusion_width.value                   = 0;
-        this->top_infill_extrusion_width.percent                 = false;
-        this->top_solid_infill_speed.value                       = 15;
-        this->top_solid_infill_speed.percent                     = false;
-        this->top_solid_layers.value                             = 3;
-    };
+    PrintRegionConfig(bool initialize = true) : StaticPrintConfig() {
+        if (initialize)
+            this->set_defaults();
+    }
     
-    ConfigOption* option(const t_config_option_key opt_key, bool create = false) {
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
         OPT_PTR(bottom_solid_layers);
         OPT_PTR(bridge_flow_ratio);
         OPT_PTR(bridge_speed);
@@ -297,6 +280,7 @@ class PrintRegionConfig : public virtual StaticPrintConfig
     };
 };
 
+// This object is mapped to Perl as Slic3r::Config::GCode.
 class GCodeConfig : public virtual StaticPrintConfig
 {
     public:
@@ -305,6 +289,7 @@ class GCodeConfig : public virtual StaticPrintConfig
     ConfigOptionString              extrusion_axis;
     ConfigOptionFloats              extrusion_multiplier;
     ConfigOptionFloats              filament_diameter;
+    ConfigOptionFloats              filament_max_volumetric_speed;
     ConfigOptionBool                gcode_comments;
     ConfigOptionEnum<GCodeFlavor>   gcode_flavor;
     ConfigOptionString              layer_gcode;
@@ -314,9 +299,11 @@ class GCodeConfig : public virtual StaticPrintConfig
     ConfigOptionFloats              retract_length;
     ConfigOptionFloats              retract_length_toolchange;
     ConfigOptionFloats              retract_lift;
+    ConfigOptionFloats              retract_lift_above;
+    ConfigOptionFloats              retract_lift_below;
     ConfigOptionFloats              retract_restart_extra;
     ConfigOptionFloats              retract_restart_extra_toolchange;
-    ConfigOptionInts                retract_speed;
+    ConfigOptionFloats              retract_speed;
     ConfigOptionString              start_gcode;
     ConfigOptionString              toolchange_gcode;
     ConfigOptionFloat               travel_speed;
@@ -324,46 +311,18 @@ class GCodeConfig : public virtual StaticPrintConfig
     ConfigOptionBool                use_relative_e_distances;
     ConfigOptionBool                use_volumetric_e;
     
-    GCodeConfig() : StaticPrintConfig() {
-        this->before_layer_gcode.value                           = "";
-        this->end_gcode.value                                    = "M104 S0 ; turn off temperature\nG28 X0  ; home X axis\nM84     ; disable motors\n";
-        this->extrusion_axis.value                               = "E";
-        this->extrusion_multiplier.values.resize(1);
-        this->extrusion_multiplier.values[0]                     = 1;
-        this->filament_diameter.values.resize(1);
-        this->filament_diameter.values[0]                        = 3;
-        this->gcode_comments.value                               = false;
-        this->gcode_flavor.value                                 = gcfRepRap;
-        this->layer_gcode.value                                  = "";
-        this->max_print_speed.value                              = 80;
-        this->max_volumetric_speed.value                         = 0;
-        this->pressure_advance.value                             = 0;
-        this->retract_length.values.resize(1);
-        this->retract_length.values[0]                           = 2;
-        this->retract_length_toolchange.values.resize(1);
-        this->retract_length_toolchange.values[0]                = 10;
-        this->retract_lift.values.resize(1);
-        this->retract_lift.values[0]                             = 0;
-        this->retract_restart_extra.values.resize(1);
-        this->retract_restart_extra.values[0]                    = 0;
-        this->retract_restart_extra_toolchange.values.resize(1);
-        this->retract_restart_extra_toolchange.values[0]         = 0;
-        this->retract_speed.values.resize(1);
-        this->retract_speed.values[0]                            = 40;
-        this->start_gcode.value                                  = "G28 ; home all axes\nG1 Z5 F5000 ; lift nozzle\n";
-        this->toolchange_gcode.value                             = "";
-        this->travel_speed.value                                 = 130;
-        this->use_firmware_retraction.value                      = false;
-        this->use_relative_e_distances.value                     = false;
-        this->use_volumetric_e.value                             = false;
-    };
+    GCodeConfig(bool initialize = true) : StaticPrintConfig() {
+        if (initialize)
+            this->set_defaults();
+    }
     
-    ConfigOption* option(const t_config_option_key opt_key, bool create = false) {
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
         OPT_PTR(before_layer_gcode);
         OPT_PTR(end_gcode);
         OPT_PTR(extrusion_axis);
         OPT_PTR(extrusion_multiplier);
         OPT_PTR(filament_diameter);
+        OPT_PTR(filament_max_volumetric_speed);
         OPT_PTR(gcode_comments);
         OPT_PTR(gcode_flavor);
         OPT_PTR(layer_gcode);
@@ -373,6 +332,8 @@ class GCodeConfig : public virtual StaticPrintConfig
         OPT_PTR(retract_length);
         OPT_PTR(retract_length_toolchange);
         OPT_PTR(retract_lift);
+        OPT_PTR(retract_lift_above);
+        OPT_PTR(retract_lift_below);
         OPT_PTR(retract_restart_extra);
         OPT_PTR(retract_restart_extra_toolchange);
         OPT_PTR(retract_speed);
@@ -398,6 +359,7 @@ class GCodeConfig : public virtual StaticPrintConfig
     };
 };
 
+// This object is mapped to Perl as Slic3r::Config::Print.
 class PrintConfig : public GCodeConfig
 {
     public:
@@ -418,6 +380,7 @@ class PrintConfig : public GCodeConfig
     ConfigOptionBool                fan_always_on;
     ConfigOptionInt                 fan_below_layer_time;
     ConfigOptionStrings             filament_colour;
+    ConfigOptionStrings             filament_notes;
     ConfigOptionFloat               first_layer_acceleration;
     ConfigOptionInt                 first_layer_bed_temperature;
     ConfigOptionFloatOrPercent      first_layer_extrusion_width;
@@ -428,7 +391,7 @@ class PrintConfig : public GCodeConfig
     ConfigOptionBool                infill_first;
     ConfigOptionInt                 max_fan_speed;
     ConfigOptionInt                 min_fan_speed;
-    ConfigOptionInt                 min_print_speed;
+    ConfigOptionFloat               min_print_speed;
     ConfigOptionFloat               min_skirt_length;
     ConfigOptionString              notes;
     ConfigOptionFloats              nozzle_diameter;
@@ -452,72 +415,12 @@ class PrintConfig : public GCodeConfig
     ConfigOptionBools               wipe;
     ConfigOptionFloat               z_offset;
     
-    PrintConfig() : GCodeConfig() {
-        this->avoid_crossing_perimeters.value                    = false;
-        this->bed_shape.values.push_back(Pointf(0,0));
-        this->bed_shape.values.push_back(Pointf(200,0));
-        this->bed_shape.values.push_back(Pointf(200,200));
-        this->bed_shape.values.push_back(Pointf(0,200));
-        this->bed_temperature.value                              = 0;
-        this->bridge_acceleration.value                          = 0;
-        this->bridge_fan_speed.value                             = 100;
-        this->brim_width.value                                   = 0;
-        this->complete_objects.value                             = false;
-        this->cooling.value                                      = true;
-        this->default_acceleration.value                         = 0;
-        this->disable_fan_first_layers.value                     = 3;
-        this->duplicate_distance.value                           = 6;
-        this->extruder_clearance_height.value                    = 20;
-        this->extruder_clearance_radius.value                    = 20;
-        this->extruder_offset.values.resize(1);
-        this->extruder_offset.values[0]                          = Pointf(0,0);
-        this->fan_always_on.value                                = false;
-        this->fan_below_layer_time.value                         = 60;
-        this->filament_colour.values.resize(1);
-        this->filament_colour.values[0]                          = "#FFFFFF";
-        this->first_layer_acceleration.value                     = 0;
-        this->first_layer_bed_temperature.value                  = 0;
-        this->first_layer_extrusion_width.value                  = 200;
-        this->first_layer_extrusion_width.percent                = true;
-        this->first_layer_speed.value                            = 30;
-        this->first_layer_speed.percent                          = false;
-        this->first_layer_temperature.values.resize(1);
-        this->first_layer_temperature.values[0]                  = 200;
-        this->gcode_arcs.value                                   = false;
-        this->infill_acceleration.value                          = 0;
-        this->infill_first.value                                 = false;
-        this->max_fan_speed.value                                = 100;
-        this->min_fan_speed.value                                = 35;
-        this->min_print_speed.value                              = 10;
-        this->min_skirt_length.value                             = 0;
-        this->notes.value                                        = "";
-        this->nozzle_diameter.values.resize(1);
-        this->nozzle_diameter.values[0]                          = 0.5;
-        this->only_retract_when_crossing_perimeters.value        = true;
-        this->ooze_prevention.value                              = false;
-        this->output_filename_format.value                       = "[input_filename_base].gcode";
-        this->perimeter_acceleration.value                       = 0;
-        this->resolution.value                                   = 0;
-        this->retract_before_travel.values.resize(1);
-        this->retract_before_travel.values[0]                    = 2;
-        this->retract_layer_change.values.resize(1);
-        this->retract_layer_change.values[0]                     = false;
-        this->skirt_distance.value                               = 6;
-        this->skirt_height.value                                 = 1;
-        this->skirts.value                                       = 1;
-        this->slowdown_below_layer_time.value                    = 5;
-        this->spiral_vase.value                                  = false;
-        this->standby_temperature_delta.value                    = -5;
-        this->temperature.values.resize(1);
-        this->temperature.values[0]                              = 200;
-        this->threads.value                                      = 2;
-        this->vibration_limit.value                              = 0;
-        this->wipe.values.resize(1);
-        this->wipe.values[0]                                     = false;
-        this->z_offset.value                                     = 0;
-    };
+    PrintConfig(bool initialize = true) : GCodeConfig(false) {
+        if (initialize)
+            this->set_defaults();
+    }
     
-    ConfigOption* option(const t_config_option_key opt_key, bool create = false) {
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
         OPT_PTR(avoid_crossing_perimeters);
         OPT_PTR(bed_shape);
         OPT_PTR(bed_temperature);
@@ -535,6 +438,7 @@ class PrintConfig : public GCodeConfig
         OPT_PTR(fan_always_on);
         OPT_PTR(fan_below_layer_time);
         OPT_PTR(filament_colour);
+        OPT_PTR(filament_notes);
         OPT_PTR(first_layer_acceleration);
         OPT_PTR(first_layer_bed_temperature);
         OPT_PTR(first_layer_extrusion_width);
@@ -571,7 +475,7 @@ class PrintConfig : public GCodeConfig
         
         // look in parent class
         ConfigOption* opt;
-        if ((opt = GCodeConfig::option(opt_key, create)) != NULL) return opt;
+        if ((opt = GCodeConfig::optptr(opt_key, create)) != NULL) return opt;
         
         return NULL;
     };
@@ -582,30 +486,138 @@ class HostConfig : public virtual StaticPrintConfig
     public:
     ConfigOptionString              octoprint_host;
     ConfigOptionString              octoprint_apikey;
+    ConfigOptionString              serial_port;
+    ConfigOptionInt                 serial_speed;
     
-    HostConfig() : StaticPrintConfig() {
-        this->octoprint_host.value                              = "";
-        this->octoprint_apikey.value                            = "";
-    };
+    HostConfig(bool initialize = true) : StaticPrintConfig() {
+        if (initialize)
+            this->set_defaults();
+    }
     
-    ConfigOption* option(const t_config_option_key opt_key, bool create = false) {
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
         OPT_PTR(octoprint_host);
         OPT_PTR(octoprint_apikey);
+        OPT_PTR(serial_port);
+        OPT_PTR(serial_speed);
         
         return NULL;
     };
 };
 
+// This object is mapped to Perl as Slic3r::Config::Full.
 class FullPrintConfig
     : public PrintObjectConfig, public PrintRegionConfig, public PrintConfig, public HostConfig
 {
     public:
-    ConfigOption* option(const t_config_option_key opt_key, bool create = false) {
+    FullPrintConfig(bool initialize = true) :
+        PrintObjectConfig(false),
+        PrintRegionConfig(false), 
+        PrintConfig(false), 
+        HostConfig(false)
+    {
+        if (initialize)
+            this->set_defaults();
+    }
+
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
         ConfigOption* opt;
-        if ((opt = PrintObjectConfig::option(opt_key, create)) != NULL) return opt;
-        if ((opt = PrintRegionConfig::option(opt_key, create)) != NULL) return opt;
-        if ((opt = PrintConfig::option(opt_key, create)) != NULL) return opt;
-        if ((opt = HostConfig::option(opt_key, create)) != NULL) return opt;
+        if ((opt = PrintObjectConfig::optptr(opt_key, create)) != NULL) return opt;
+        if ((opt = PrintRegionConfig::optptr(opt_key, create)) != NULL) return opt;
+        if ((opt = PrintConfig::optptr(opt_key, create)) != NULL) return opt;
+        if ((opt = HostConfig::optptr(opt_key, create)) != NULL) return opt;
+        return NULL;
+    };
+};
+
+class SLAPrintConfig
+    : public virtual StaticPrintConfig
+{
+    public:
+    ConfigOptionFloat               fill_angle;
+    ConfigOptionPercent             fill_density;
+    ConfigOptionEnum<InfillPattern> fill_pattern;
+    ConfigOptionFloatOrPercent      first_layer_height;
+    ConfigOptionFloatOrPercent      infill_extrusion_width;
+    ConfigOptionFloat               layer_height;
+    ConfigOptionFloatOrPercent      perimeter_extrusion_width;
+    ConfigOptionInt                 raft_layers;
+    ConfigOptionFloat               raft_offset;
+    ConfigOptionBool                support_material;
+    ConfigOptionFloatOrPercent      support_material_extrusion_width;
+    ConfigOptionFloat               support_material_spacing;
+    ConfigOptionInt                 threads;
+    
+    SLAPrintConfig() : StaticPrintConfig() {
+        this->set_defaults();
+        
+        // override some defaults
+        this->fill_density.value                = 100;
+        this->fill_pattern.value                = ipGrid;
+        this->infill_extrusion_width.value      = 0.5;
+        this->infill_extrusion_width.percent    = false;
+        this->perimeter_extrusion_width.value   = 1;
+        this->perimeter_extrusion_width.percent = false;
+    };
+    
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
+        OPT_PTR(fill_angle);
+        OPT_PTR(fill_density);
+        OPT_PTR(fill_pattern);
+        OPT_PTR(first_layer_height);
+        OPT_PTR(infill_extrusion_width);
+        OPT_PTR(layer_height);
+        OPT_PTR(perimeter_extrusion_width);
+        OPT_PTR(raft_layers);
+        OPT_PTR(raft_offset);
+        OPT_PTR(support_material);
+        OPT_PTR(support_material_extrusion_width);
+        OPT_PTR(support_material_spacing);
+        OPT_PTR(threads);
+        
+        return NULL;
+    };
+};
+
+class CLIConfigDef : public ConfigDef
+{
+    public:
+    CLIConfigDef();
+};
+
+extern CLIConfigDef cli_config_def;
+
+class CLIConfig
+    : public virtual ConfigBase, public StaticConfig
+{
+    public:
+    ConfigOptionBool                export_obj;
+    ConfigOptionBool                export_pov;
+    ConfigOptionBool                export_svg;
+    ConfigOptionBool                info;
+    ConfigOptionStrings             load;
+    ConfigOptionString              output;
+    ConfigOptionFloat               rotate;
+    ConfigOptionString              save;
+    ConfigOptionFloat               scale;
+    ConfigOptionPoint3              scale_to_fit;
+    
+    CLIConfig() : ConfigBase(), StaticConfig() {
+        this->def = &cli_config_def;
+        this->set_defaults();
+    };
+    
+    virtual ConfigOption* optptr(const t_config_option_key &opt_key, bool create = false) {
+        OPT_PTR(export_obj);
+        OPT_PTR(export_pov);
+        OPT_PTR(export_svg);
+        OPT_PTR(info);
+        OPT_PTR(load);
+        OPT_PTR(output);
+        OPT_PTR(rotate);
+        OPT_PTR(save);
+        OPT_PTR(scale);
+        OPT_PTR(scale_to_fit);
+        
         return NULL;
     };
 };

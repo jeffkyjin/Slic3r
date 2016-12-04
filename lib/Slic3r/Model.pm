@@ -1,6 +1,7 @@
+# extends C++ class Slic3r::Model
 package Slic3r::Model;
 
-use List::Util qw(first max);
+use List::Util qw(first max any);
 use Slic3r::Geometry qw(X Y Z move_points);
 
 sub read_from_file {
@@ -67,122 +68,34 @@ sub set_material {
     return $material;
 }
 
-sub duplicate_objects_grid {
-    my ($self, $grid, $distance) = @_;
+sub looks_like_multipart_object {
+    my ($self) = @_;
+    
+    return 0 if $self->objects_count == 1;
+    return 0 if any { $_->volumes_count > 1 } @{$self->objects};
+    return 0 if any { @{$_->config->get_keys} > 1 } @{$self->objects};
+    
+    my %heights = map { $_ => 1 } map $_->mesh->bounding_box->z_min, map @{$_->volumes}, @{$self->objects};
+    return scalar(keys %heights) > 1;
+}
 
-    die "Grid duplication is not supported with multiple objects\n"
-        if @{$self->objects} > 1;
-
-    my $object = $self->objects->[0];
-    $object->clear_instances;
-
-    my $size = $object->bounding_box->size;
-    for my $x_copy (1..$grid->[X]) {
-        for my $y_copy (1..$grid->[Y]) {
-            $object->add_instance(
-                offset => Slic3r::Pointf->new(
-                    ($size->[X] + $distance) * ($x_copy-1),
-                    ($size->[Y] + $distance) * ($y_copy-1),
-                ),
-            );
-        }
+sub convert_multipart_object {
+    my ($self) = @_;
+    
+    my @objects = @{$self->objects};
+    my $object = $self->add_object(
+        input_file          => $objects[0]->input_file,
+    );
+    foreach my $v (map @{$_->volumes}, @objects) {
+        my $volume = $object->add_volume($v);
+        $volume->set_name($v->object->name);
     }
+    $object->add_instance($_) for map @{$_->instances}, @objects;
+    
+    $self->delete_object($_) for reverse 0..($self->objects_count-2);
 }
 
-# this will append more instances to each object
-# and then automatically rearrange everything
-sub duplicate_objects {
-    my ($self, $copies_num, $distance, $bb) = @_;
-    
-    foreach my $object (@{$self->objects}) {
-        my @instances = @{$object->instances};
-        foreach my $instance (@instances) {
-            $object->add_instance($instance) for 2..$copies_num;
-        }
-    }
-    
-    $self->arrange_objects($distance, $bb);
-}
-
-# arrange objects preserving their instance count
-# but altering their instance positions
-sub arrange_objects {
-    my ($self, $distance, $bb) = @_;
-    
-    # get the (transformed) size of each instance so that we take
-    # into account their different transformations when packing
-    my @instance_sizes = ();
-    foreach my $object (@{$self->objects}) {
-        push @instance_sizes, map $object->instance_bounding_box($_)->size, 0..$#{$object->instances};
-    }
-    
-    my @positions = $self->_arrange(\@instance_sizes, $distance, $bb);
-    
-    foreach my $object (@{$self->objects}) {
-        $_->set_offset(Slic3r::Pointf->new(@{shift @positions})) for @{$object->instances};
-        $object->update_bounding_box;
-    }
-}
-
-# duplicate the entire model preserving instance relative positions
-sub duplicate {
-    my ($self, $copies_num, $distance, $bb) = @_;
-    
-    my $model_size = $self->bounding_box->size;
-    my @positions = $self->_arrange([ map $model_size, 2..$copies_num ], $distance, $bb);
-    
-    # note that this will leave the object count unaltered
-    
-    foreach my $object (@{$self->objects}) {
-        my @instances = @{$object->instances};  # store separately to avoid recursion from add_instance() below
-        foreach my $instance (@instances) {
-            foreach my $pos (@positions) {
-                $object->add_instance(
-                    offset          => Slic3r::Pointf->new($instance->offset->[X] + $pos->[X], $instance->offset->[Y] + $pos->[Y]),
-                    rotation        => $instance->rotation,
-                    scaling_factor  => $instance->scaling_factor,
-                );
-            }
-        }
-        $object->update_bounding_box;
-    }
-}
-
-sub _arrange {
-    my ($self, $sizes, $distance, $bb) = @_;
-
-    $bb //= Slic3r::Geometry::BoundingBoxf->new;
-    
-    # we supply unscaled data to arrange()
-    return @{Slic3r::Geometry::arrange(
-        scalar(@$sizes),                # number of parts
-        Slic3r::Pointf->new(
-            max(map $_->x, @$sizes),        # cell width
-            max(map $_->y, @$sizes),        # cell height  ,
-        ),
-        $distance,                      # distance between cells
-        $bb,                            # bounding box of the area to fill (can be undef)
-    )};
-}
-
-sub print_info {
-    my $self = shift;
-    $_->print_info for @{$self->objects};
-}
-
-sub get_material_name {
-    my $self = shift;
-    my ($material_id) = @_;
-    
-    my $name;
-    if ($self->has_material($material_id)) {
-        $name //= $self->get_material($material_id)
-            ->attributes->{$_} for qw(Name name);
-    }
-    $name //= $material_id;
-    return $name;
-}
-
+# Extends C++ class Slic3r::ModelMaterial
 package Slic3r::Model::Material;
 
 sub apply {
@@ -190,6 +103,7 @@ sub apply {
     $self->set_attribute($_, $attributes{$_}) for keys %$attributes;
 }
 
+# Extends C++ class Slic3r::ModelObject
 package Slic3r::Model::Object;
 
 use File::Basename qw(basename);
@@ -263,38 +177,6 @@ sub add_instance {
             if defined $args{offset};
         
         return $new_instance;
-    }
-}
-
-sub mesh_stats {
-    my $self = shift;
-    
-    # TODO: sum values from all volumes
-    return $self->volumes->[0]->mesh->stats;
-}
-
-sub print_info {
-    my $self = shift;
-    
-    printf "Info about %s:\n", basename($self->input_file);
-    printf "  size:              x=%.3f y=%.3f z=%.3f\n", @{$self->raw_mesh->bounding_box->size};
-    if (my $stats = $self->mesh_stats) {
-        printf "  number of facets:  %d\n", $stats->{number_of_facets};
-        printf "  number of shells:  %d\n", $stats->{number_of_parts};
-        printf "  volume:            %.3f\n", $stats->{volume};
-        if ($self->needed_repair) {
-            printf "  needed repair:     yes\n";
-            printf "  degenerate facets: %d\n", $stats->{degenerate_facets};
-            printf "  edges fixed:       %d\n", $stats->{edges_fixed};
-            printf "  facets removed:    %d\n", $stats->{facets_removed};
-            printf "  facets added:      %d\n", $stats->{facets_added};
-            printf "  facets reversed:   %d\n", $stats->{facets_reversed};
-            printf "  backwards edges:   %d\n", $stats->{backwards_edges};
-        } else {
-            printf "  needed repair:     no\n";
-        }
-    } else {
-        printf "  number of facets:  %d\n", scalar(map @{$_->facets}, grep !$_->modifier, @{$self->volumes});
     }
 }
 

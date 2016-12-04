@@ -1,7 +1,7 @@
 #ifndef slic3r_Line_hpp_
 #define slic3r_Line_hpp_
 
-#include <myinit.h>
+#include "libslic3r.h"
 #include "Point.hpp"
 
 namespace Slic3r {
@@ -9,7 +9,9 @@ namespace Slic3r {
 class Line;
 class Linef3;
 class Polyline;
+class ThickLine;
 typedef std::vector<Line> Lines;
+typedef std::vector<ThickLine> ThickLines;
 
 class Line
 {
@@ -39,13 +41,19 @@ class Line
     double direction() const;
     Vector vector() const;
     Vector normal() const;
+    void extend_end(double distance);
+    void extend_start(double distance);
+    bool intersection(const Line& line, Point* intersection) const;
+    double ccw(const Point& point) const;
+};
+
+class ThickLine : public Line
+{
+    public:
+    coordf_t a_width, b_width;
     
-    #ifdef SLIC3RXS
-    void from_SV(SV* line_sv);
-    void from_SV_check(SV* line_sv);
-    SV* to_AV();
-    SV* to_SV_pureperl() const;
-    #endif
+    ThickLine() : a_width(0), b_width(0) {};
+    ThickLine(Point _a, Point _b) : Line(_a, _b), a_width(0), b_width(0) {};
 };
 
 class Linef
@@ -66,12 +74,6 @@ class Linef3
     explicit Linef3(Pointf3 _a, Pointf3 _b): a(_a), b(_b) {};
     Pointf3 intersect_plane(double z) const;
     void scale(double factor);
-    
-    #ifdef SLIC3RXS
-    void from_SV(SV* line_sv);
-    void from_SV_check(SV* line_sv);
-    SV* to_SV_pureperl() const;
-    #endif
 };
 
 }
